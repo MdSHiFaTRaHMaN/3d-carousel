@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>3D Fashion Carousel</title>
+  <style>
+    :root {
+      --teal: #0B414C;
+      --teal-deep: #06262e;
+      box-sizing: border-box
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: inherit
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      background: var(--teal-deep);
+      overflow-x: hidden
+    }
+
+    .hero {
+      position: relative;
+      width: 100%;
+      min-height: 100vh;
+      height: 100vh;
+      overflow: hidden;
+      background: radial-gradient(ellipse 70% 60% at 50% 38%, #17617a 0%, var(--teal) 45%, var(--teal-deep) 100%);
+      cursor: grab;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: pan-y;
+      outline: none
+    }
+
+    .hero.dragging {
+      cursor: grabbing
+    }
+
+    .hero:focus-visible {
+      box-shadow: inset 0 0 0 3px rgba(255, 255, 255, .6)
+    }
+
+    .floor {
+      position: absolute;
+      left: 50%;
+      bottom: -6%;
+      width: 90%;
+      height: 22%;
+      transform: translateX(-50%);
+      background: radial-gradient(ellipse at center, rgba(0, 0, 0, .55), transparent 68%);
+      pointer-events: none
+    }
+
+    /* 3D scene: model + ring share one perspective space so depth sorting is real */
+    .scene {
+      position: absolute;
+      inset: 0;
+      perspective: 1400px;
+      perspective-origin: 50% 40%;
+      transform-style: preserve-3d
+    }
+
+    .model {
+      position: absolute;
+      left: 50%;
+      bottom: 0;
+      height: 87%;
+      aspect-ratio: 3/6;
+      transform: translate3d(-50%, 0, 0);
+      pointer-events: none;
+      opacity: 0;
+      animation: rise 1.4s .1s cubic-bezier(.2, .7, .2, 1) forwards
+    }
+
+    .model img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      object-position: bottom;
+      display: block;
+      -webkit-user-drag: none;
+      filter: drop-shadow(0 20px 30px rgba(0, 0, 0, .35))
+    }
+
+    .ring {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      width: 0;
+      height: 0;
+      transform-style: preserve-3d
+    }
+
+    .card {
+      position: absolute;
+      margin: 0;
+      padding: 0;
+      border: 1px solid rgba(255, 255, 255, .7);
+      border-radius: clamp(10px, 1.6vh, 20px);
+      overflow: hidden;
+      background: rgba(255, 255, 255, .08);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+      backface-visibility: visible;
+      cursor: inherit;
+      will-change: transform, opacity;
+      transition: filter .25s
+    }
+
+    .card img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+      -webkit-user-drag: none;
+      pointer-events: none
+    }
+
+    .card:hover,
+    .card:focus-visible {
+      filter: brightness(1.12) contrast(1.05);
+      outline: none
+    }
+
+    .card:focus-visible {
+      border-color: #fff;
+      border-width: 2px
+    }
+
+    .promo {
+      position: absolute;
+      top: max(2vh, env(safe-area-inset-top, 0px));
+      right: clamp(10px, 2vw, 28px);
+      z-index: 50;
+      width: clamp(110px, 15vh, 170px);
+      text-align: center;
+      pointer-events: none;
+      animation: fade 1s 1s both
+    }
+
+    .promo h2 {
+      margin: 0 0 4px;
+      font: 900 clamp(15px, 2.9vh, 28px)/1.02 "Archivo Black", "Arial Black", Impact, sans-serif;
+      color: #fff;
+      text-transform: uppercase;
+      -webkit-text-stroke: clamp(2px, .5vh, 5px) #0a0a0a;
+      paint-order: stroke fill;
+      text-shadow: 0 2px 0 #000
+    }
+
+    .promo svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: #fff;
+      border: 4px solid #fff
+    }
+
+    @keyframes rise {
+      from {
+        opacity: 0;
+        transform: translate3d(-50%, 40px, 0) scale(.97)
+      }
+
+      to {
+        opacity: 1;
+        transform: translate3d(-50%, 0, 0)
+      }
+    }
+
+    @keyframes fade {
+      from {
+        opacity: 0
+      }
+
+      to {
+        opacity: 1
+      }
+    }
+
+    @media (prefers-reduced-motion:reduce) {
+
+      .model,
+      .promo {
+        animation: none;
+        opacity: 1
+      }
+    }
+
+    @media (max-width:700px) {
+      .promo {
+        width: clamp(84px, 24vw, 110px)
+      }
+
+      .promo h2 {
+        font-size: 14px
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <section class="hero" id="hero" tabindex="0"
+    aria-label="Rotating 3D fashion carousel. Drag or use arrow keys to rotate.">
+    <div class="floor"></div>
+    <div class="scene" id="scene">
+      <div class="model"><img id="model" alt="Full-body model in a cream pantsuit and white shirt"></div>
+      <div class="ring" id="ring"></div>
+    </div>
+  </section>
+
+  <script>
+    /* ============ ASSET CONFIG — swap these paths for your real images ============
+       If a file is missing, a clearly-marked generated placeholder is shown instead. */
+    const ASSETS = {
+      model: { src: './assets/Androgynous White Suit Editorial.png', alt: 'Full-body model in a cream pantsuit' },
+      qr: { src: 'assets/qr-code.png' },
+      looks: [
+        { src: './assets/Androgynous White Suit Editorial.png', alt: 'Cream formal pantsuit', tone: '#efe6cf', kind: 'suit' },
+        { src: './assets/Androgynous White Suit Editorial.png', alt: 'Blue denim outfit', tone: '#5d86b5', kind: 'pants' },
+        { src: './assets/Androgynous White Suit Editorial.png', alt: 'Beige evening gown', tone: '#d9b9a2', kind: 'dress' },
+        { src: './assets/Androgynous White Suit Editorial.png', alt: 'Black streetwear', tone: '#1d1f24', kind: 'pants' },
+        { src: './assets/Androgynous White Suit Editorial.png', alt: 'White minimalist outfit', tone: '#f4f1ea', kind: 'pants' },
+        { src: './assets/Androgynous White Suit Editorial.png', alt: 'Blue shirt and jeans', tone: '#8fb0d6', kind: 'pants' },
+        { src: './assets/Androgynous White Suit Editorial.png', alt: 'Neutral modern look', tone: '#c9b8a0', kind: 'suit' },
+        { src: './assets/Androgynous White Suit Editorial.png', alt: 'Tailored beige dress', tone: '#e3cdb4', kind: 'dress' },
+        { src: './assets/Androgynous White Suit Editorial.png', alt: 'Charcoal tailoring', tone: '#4a4f58', kind: 'suit' },
+        { src: './assets/Androgynous White Suit Editorial.png', alt: 'Ivory evening gown', tone: '#f1e4d4', kind: 'dress' }
+      ]
+    };
+    const CFG = { revolutionSec: 45, hoverSlow: .25, inertia: .94, tiltMin: 4, tiltMax: 16 };
+
+    /* ---------- placeholder art (inline SVG, labeled) ---------- */
+    const svgURI = s => 'data:image/svg+xml;utf8,' + encodeURIComponent(s);
+    function figure(tone, kind, w, h, label, transparent) {
+      const bg = transparent ? '' : `<rect width="${w}" height="${h}" fill="#1c6a7d"/><rect y="${h * .8}" width="${w}" height="${h * .2}" fill="#0f4a58"/>`;
+      const cx = w / 2, hair = '#a8532c', skin = '#efc9b0';
+      const lower = kind === 'dress'
+        ? `<path d="M${cx - w * .13} ${h * .42} L${cx - w * .3} ${h * .9} Q${cx} ${h * .95} ${cx + w * .3} ${h * .9} L${cx + w * .13} ${h * .42}Z" fill="${tone}"/>`
+        : `<rect x="${cx - w * .14}" y="${h * .5}" width="${w * .12}" height="${h * .42}" fill="${tone}"/><rect x="${cx + w * .02}" y="${h * .5}" width="${w * .12}" height="${h * .42}" fill="${tone}"/>`;
+      return svgURI(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">${bg}
+    <path d="M${cx - w * .12} ${h * .1} Q${cx} ${h * .02} ${cx + w * .12} ${h * .1} L${cx + w * .16} ${h * .34} L${cx - w * .16} ${h * .34}Z" fill="${hair}"/>
+    <ellipse cx="${cx}" cy="${h * .12}" rx="${w * .07}" ry="${h * .05}" fill="${skin}"/>
+    <rect x="${cx - w * .18}" y="${h * .2}" width="${w * .36}" height="${h * .3}" rx="${w * .05}" fill="${tone}" stroke="rgba(0,0,0,.12)"/>
+    ${kind === 'suit' ? `<rect x="${cx - w * .03}" y="${h * .2}" width="${w * .06}" height="${h * .16}" fill="#fff"/>` : ''}
+    ${lower}
+    ${label ? `<text x="${cx}" y="${h * .97}" font-family="Arial" font-size="${h * .028}" fill="#fff" fill-opacity=".7" text-anchor="middle">PLACEHOLDER</text>` : ''}
+  </svg>`);
+    }
+    function setImg(img, cfg, fallback, lazy) {
+      img.alt = cfg.alt || '';
+      if (lazy) img.loading = 'lazy';
+      img.decoding = 'async';
+      img.onerror = () => { img.onerror = null; img.src = fallback; };
+      img.src = cfg.src;
+    }
+
+    /* ---------- build DOM ---------- */
+    const hero = document.getElementById('hero'), ring = document.getElementById('ring');
+    setImg(document.getElementById('model'), ASSETS.model, figure('#efe6cf', 'suit', 400, 1000, true, true), false);
+    const N = ASSETS.looks.length, STEP = 360 / N;
+    const cards = ASSETS.looks.map((l, i) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'card'; b.setAttribute('aria-label', 'Bring look to front: ' + l.alt);
+      const img = document.createElement('img');
+      setImg(img, l, figure(l.tone, l.kind, 300, 400, true, false), i > 3);
+      b.appendChild(img); ring.appendChild(b);
+      b.addEventListener('click', () => { if (!moved) focusCard(i); });
+      return b;
+    });
+
+    /* QR placeholder pattern (not a working code) */
+
+    /* ---------- animation state ---------- */
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+    let rot = 0, vel = 0, tilt = 9, tiltTarget = 9, speedBias = 0;
+    let dragging = false, hovering = false, moved = false, lastX = 0, lastT = 0, focusTo = null;
+    let W = 0, H = 0, R = 0, cw = 0, ch = 0, raf = 0, last = performance.now();
+
+    function layout() {
+      W = hero.clientWidth; H = hero.clientHeight;
+      ch = Math.min(H * .27, W * .25); cw = ch * .75;      // 3:4 portrait (smaller cards)
+      R = N * (cw + 20) / (2 * Math.PI);                   // orbit radius: 20px gap between cards
+      ring.style.top = (H * .53 - ch / 2) + 'px';
+      cards.forEach(c => { c.style.width = cw + 'px'; c.style.height = ch + 'px'; c.style.left = (-cw / 2) + 'px'; });
+    }
+
+    function render() {
+      ring.style.transform = `rotateX(${-tilt}deg)`;
+      for (let i = 0; i < N; i++) {
+        const a = i * STEP + rot, r = a * Math.PI / 180;
+        const depth = (Math.cos(r) + 1) / 2;                 // 1 = front, 0 = back
+        const c = cards[i];
+        c.style.transform = `rotateY(${a}deg) translateZ(${R}px) scale(${.72 + .34 * depth})`;
+        c.style.opacity = (.4 + .6 * depth).toFixed(3);
+        c.style.zIndex = Math.round(depth * 100);
+        c.tabIndex = depth > .5 ? 0 : -1;
+      }
+    }
+
+    function frame(now) {
+      const dt = Math.min(.05, (now - last) / 1000); last = now;
+      if (focusTo !== null) {                                  // click-to-front easing
+        const d = ((focusTo - rot + 540) % 360) - 180;
+        rot += d * Math.min(1, dt * 5);
+        if (Math.abs(d) < .1) focusTo = null;
+      } else if (dragging) {
+        /* rotation follows pointer directly */
+      } else {
+        rot += vel; vel *= Math.pow(CFG.inertia, dt * 60);
+        if (Math.abs(vel) < .02) vel = 0;
+        if (!reduce.matches) {
+          const base = 360 / CFG.revolutionSec * (hovering ? CFG.hoverSlow : 1);
+          rot += (base + speedBias) * dt;
+        }
+      }
+      tilt += (tiltTarget - tilt) * Math.min(1, dt * 4);
+      render();
+      raf = requestAnimationFrame(frame);
+    }
+
+    function focusCard(i) { focusTo = ((-i * STEP) % 360 + 360) % 360; vel = 0; }
+
+    /* ---------- pointer interaction ---------- */
+    hero.addEventListener('pointerdown', e => {
+      dragging = true; moved = false; focusTo = null; vel = 0;
+      lastX = e.clientX; lastT = performance.now();
+      hero.classList.add('dragging'); hero.setPointerCapture(e.pointerId);
+    });
+    hero.addEventListener('pointermove', e => {
+      const nx = e.clientX / W - .5, ny = e.clientY / H;
+      if (!dragging) {                                         // hover: gentle influence
+        hovering = true; speedBias = nx * 5;
+        tiltTarget = CFG.tiltMin + (CFG.tiltMax - CFG.tiltMin) * ny;
+        return;
+      }
+      const dx = e.clientX - lastX, now = performance.now();
+      if (Math.abs(dx) > 2) moved = true;
+      const d = dx * 180 / (R * 1.2);                         // ~1:1 feel at the front
+      rot += d; vel = d * .6 * (16 / Math.max(8, now - lastT)); lastX = e.clientX; lastT = now;
+    });
+    const end = e => {
+      if (!dragging) return; dragging = false; hero.classList.remove('dragging');
+      if (hero.hasPointerCapture(e.pointerId)) hero.releasePointerCapture(e.pointerId);
+      setTimeout(() => moved = false, 0);
+    };
+    hero.addEventListener('pointerup', end);
+    hero.addEventListener('pointercancel', end);
+    hero.addEventListener('pointerenter', () => hovering = true);
+    hero.addEventListener('pointerleave', () => { hovering = false; speedBias = 0; tiltTarget = 9; });
+    hero.addEventListener('dragstart', e => e.preventDefault());
+    hero.addEventListener('keydown', e => {
+      if (e.key === 'ArrowRight') { focusTo = null; vel += 1.2; }
+      if (e.key === 'ArrowLeft') { focusTo = null; vel -= 1.2; }
+    });
+
+    /* ---------- lifecycle ---------- */
+    const ro = new ResizeObserver(layout); ro.observe(hero);
+    layout(); raf = requestAnimationFrame(frame);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) cancelAnimationFrame(raf); else { last = performance.now(); raf = requestAnimationFrame(frame); }
+    });
+    /* cleanup if embedded as a component */
+    window.destroyCarousel = () => { cancelAnimationFrame(raf); ro.disconnect(); };
+  </script>
+</body>
+
+</html>
